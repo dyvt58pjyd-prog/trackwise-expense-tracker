@@ -1,12 +1,13 @@
 import React, { useState, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { useAuth } from '../../context/AuthContext';
+import { useSync } from '../../context/SyncContext';
 import { db } from '../../db/database';
 import { Category, BackupData } from '../../types';
 import { CategoryIcon, AVAILABLE_ICONS } from '../../utils/categoryIcons';
 import { blobToBase64, base64ToBlob } from '../../utils/imageCompression';
 import { encryptBackup, decryptBackup, hashWithSalt } from '../../utils/crypto';
-import { downloadFile } from '../../utils/platform';
+import { downloadFile, isCapacitor } from '../../utils/platform';
 import { getCurrentDateStr } from '../../utils/formatters';
 import {
   User,
@@ -16,11 +17,12 @@ import {
   Plus,
   Trash2,
   Lock,
-  Palette,
+  Database,
   Check,
   AlertCircle,
-  KeyRound,
   RefreshCw,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 
 const CURRENCIES = [
@@ -32,11 +34,6 @@ const CURRENCIES = [
   { symbol: 'C$', name: 'CAD (Canadian Dollar)' },
   { symbol: 'A$', name: 'AUD (Australian Dollar)' },
   { symbol: '¥', name: 'JPY (Japanese Yen)' },
-];
-
-const PRESET_COLORS = [
-  '#f97316', '#10b981', '#06b6d4', '#eab308', '#ec4899', '#ef4444',
-  '#8b5cf6', '#22c55e', '#3b82f6', '#14b8a6', '#64748b', '#d97706',
 ];
 
 interface SettingsModalProps {
@@ -53,9 +50,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRefreshData,
 }) => {
   const { user, updateUserSettings } = useAuth();
+  const { syncStatus, lastSyncedAt, serverUrl, triggerSync, updateServerUrl, testConnection } = useSync();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'categories' | 'backup'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'categories' | 'neon' | 'backup'>('profile');
 
   // Profile fields
   const [name, setName] = useState<string>(user?.name || '');
@@ -68,6 +66,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [catType, setCatType] = useState<'expense' | 'income'>('expense');
   const [catIcon, setCatIcon] = useState<string>('Tag');
   const [catColor, setCatColor] = useState<string>('#10b981');
+
+  // Neon Sync fields
+  const [customServerUrl, setCustomServerUrl] = useState<string>(serverUrl);
+  const [isTestingNeon, setIsTestingNeon] = useState<boolean>(false);
+  const [neonTestResult, setNeonTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isCopiedSql, setIsCopiedSql] = useState<boolean>(false);
 
   // Backup fields
   const [exportPassphrase, setExportPassphrase] = useState<string>('');
@@ -144,6 +148,116 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleTestNeon = async () => {
+    setIsTestingNeon(true);
+    setNeonTestResult(null);
+
+    const res = await testConnection(customServerUrl);
+    setIsTestingNeon(false);
+
+    if (res.success && res.connected) {
+      setNeonTestResult({ success: true, message: 'Connected to Neon Serverless Postgres via /api/sync!' });
+      await updateServerUrl(customServerUrl);
+    } else {
+      setNeonTestResult({
+        success: false,
+        message: res.error || 'Connection failed. Check Vercel deployment and DATABASE_URL variable.',
+      });
+    }
+  };
+
+  const handleSaveNeonUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await updateServerUrl(customServerUrl);
+    if (res.success) {
+      setFeedback({ type: 'success', message: 'Neon server URL saved and verified!' });
+    } else {
+      setFeedback({ type: 'error', message: res.error || 'Saved, but could not reach server.' });
+    }
+  };
+
+  const handleCopySql = () => {
+    const sqlText = `-- TrackWise Neon PostgreSQL Schema
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS categories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sync_id TEXT UNIQUE NOT NULL,
+  username TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  icon TEXT NOT NULL,
+  color TEXT NOT NULL,
+  budget_limit NUMERIC,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sync_id TEXT UNIQUE NOT NULL,
+  username TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  type TEXT NOT NULL,
+  payment_mode TEXT NOT NULL,
+  category_name TEXT NOT NULL,
+  date TEXT NOT NULL,
+  note TEXT,
+  receipt_base64 TEXT,
+  created_at BIGINT NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bills (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sync_id TEXT UNIQUE NOT NULL,
+  username TEXT NOT NULL,
+  title TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  due_day INTEGER NOT NULL,
+  category_name TEXT NOT NULL,
+  payment_mode TEXT NOT NULL,
+  last_paid_month TEXT,
+  auto_remind BOOLEAN DEFAULT TRUE,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS goals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sync_id TEXT UNIQUE NOT NULL,
+  username TEXT NOT NULL,
+  title TEXT NOT NULL,
+  target_amount NUMERIC NOT NULL,
+  current_amount NUMERIC NOT NULL,
+  target_date TEXT NOT NULL,
+  color TEXT NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS debts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sync_id TEXT UNIQUE NOT NULL,
+  username TEXT NOT NULL,
+  person_name TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  type TEXT NOT NULL,
+  date TEXT NOT NULL,
+  due_date TEXT,
+  status TEXT NOT NULL,
+  note TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_user ON categories (username, updated_at);
+CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions (username, updated_at);
+CREATE INDEX IF NOT EXISTS idx_bills_user ON bills (username, updated_at);
+CREATE INDEX IF NOT EXISTS idx_goals_user ON goals (username, updated_at);
+CREATE INDEX IF NOT EXISTS idx_debts_user ON debts (username, updated_at);`;
+
+    navigator.clipboard.writeText(sqlText);
+    setIsCopiedSql(true);
+    setTimeout(() => setIsCopiedSql(false), 2500);
+  };
+
   const handleExportBackup = async () => {
     if (!user || !user.id) return;
     setFeedback(null);
@@ -156,7 +270,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const userGoals = await db.goals.where('userId').equals(user.id).toArray();
       const userDebts = await db.debts.where('userId').equals(user.id).toArray();
 
-      // Convert Blobs to Base64
       const serializedTransactions = await Promise.all(
         userTransactions.map(async (t) => {
           let receiptBase64: string | undefined = undefined;
@@ -254,14 +367,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     reader.onload = (event) => {
       const content = event.target?.result as string;
       setPendingImportData(content);
-      // Check if encrypted
       try {
         const parsed = JSON.parse(content);
         if (parsed.version === 1 && parsed.ciphertext && parsed.iv) {
-          // Encrypted! Prompt user for passphrase
           setImportPassphrase('');
         } else {
-          // Plain JSON backup
           executeRestore(content);
         }
       } catch (err) {
@@ -298,25 +408,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         throw new Error('Incompatible backup format.');
       }
 
-      // Map categories
-      const oldToNewCategoryIdMap: Record<number, number> = {};
-      for (const [idx, cat] of data.categories.entries()) {
+      for (const cat of data.categories) {
         const existing = await db.categories
           .where({ userId: user.id, name: cat.name })
           .first();
 
-        if (existing && existing.id) {
-          oldToNewCategoryIdMap[idx] = existing.id;
-        } else {
-          const newId = await db.categories.add({
+        if (!existing) {
+          await db.categories.add({
             ...cat,
             userId: user.id,
           });
-          oldToNewCategoryIdMap[idx] = newId;
         }
       }
 
-      // Restore transactions
       for (const t of data.transactions) {
         let receiptBlob: Blob | undefined = undefined;
         if (t.receiptBase64) {
@@ -340,7 +444,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         });
       }
 
-      // Restore bills
       if (data.bills) {
         for (const b of data.bills) {
           await db.bills.add({
@@ -350,7 +453,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       }
 
-      // Restore goals
       if (data.goals) {
         for (const g of data.goals) {
           await db.goals.add({
@@ -360,7 +462,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       }
 
-      // Restore debts
       if (data.debts) {
         for (const d of data.debts) {
           await db.debts.add({
@@ -372,7 +473,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       setFeedback({
         type: 'success',
-        message: `Restore complete! Successfully imported transactions, bills, goals, and categories.`,
+        message: 'Restore complete! Successfully imported data.',
       });
       onRefreshData();
     } catch (err: any) {
@@ -386,13 +487,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Settings, Security & Backup"
-      subtitle="Manage profile, PIN, custom categories, and offline data backups"
+      title="Settings, Security & Cloud Sync"
+      subtitle="Manage profile, categories, Neon Postgres cloud sync, and offline backups"
       maxWidth="max-w-xl"
     >
       <div className="space-y-4">
         {/* Nav Tabs */}
-        <div className="grid grid-cols-3 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold">
+        <div className="grid grid-cols-4 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] sm:text-xs font-semibold">
           <button
             type="button"
             onClick={() => setActiveTab('profile')}
@@ -402,7 +503,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            Profile & PIN
+            Profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('neon')}
+            className={`py-1.5 rounded-lg transition ${
+              activeTab === 'neon'
+                ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-slate-100'
+                : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            Neon Sync
           </button>
           <button
             type="button"
@@ -424,7 +536,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            Backup & Restore
+            Backup
           </button>
         </div>
 
@@ -446,7 +558,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
 
-        {/* TAB 1: PROFILE & PIN */}
+        {/* TAB 1: PROFILE */}
         {activeTab === 'profile' && (
           <form onSubmit={handleSaveProfile} className="space-y-4 pt-1">
             <div className="grid grid-cols-2 gap-3">
@@ -524,10 +636,127 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </form>
         )}
 
-        {/* TAB 2: CUSTOM CATEGORIES */}
+        {/* TAB 2: NEON CLOUD SYNC */}
+        {activeTab === 'neon' && (
+          <div className="space-y-4 pt-1">
+            {/* Status Card */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    Neon Serverless PostgreSQL
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Status: <span className="font-semibold text-emerald-600 dark:text-emerald-400 capitalize">{syncStatus}</span> {lastSyncedAt ? `(Last synced: ${lastSyncedAt})` : ''}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => triggerSync()}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold text-xs transition shadow-sm"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Sync Now</span>
+              </button>
+            </div>
+
+            {/* Server Endpoint URL (Needed for Android APK to connect to Vercel) */}
+            <form onSubmit={handleSaveNeonUrl} className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Sync Server URL (Vercel Deployment)
+              </label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="url"
+                  value={customServerUrl}
+                  onChange={(e) => setCustomServerUrl(e.target.value)}
+                  placeholder="https://your-expense-tracker.vercel.app"
+                  className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs focus:outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestNeon}
+                  disabled={isTestingNeon}
+                  className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition"
+                >
+                  {isTestingNeon ? 'Testing...' : 'Test'}
+                </button>
+                <button
+                  type="submit"
+                  className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-semibold text-xs transition"
+                >
+                  Save
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                {isCapacitor()
+                  ? 'On Android, set this to your deployed Vercel domain (e.g. https://my-app.vercel.app).'
+                  : 'On Web, leaving this blank automatically uses your current domain.'}
+              </p>
+            </form>
+
+            {neonTestResult && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-medium flex items-center space-x-2 ${
+                  neonTestResult.success
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-rose-500/10 border-rose-500/20 text-rose-500'
+                }`}
+              >
+                {neonTestResult.success ? (
+                  <Check className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{neonTestResult.message}</span>
+              </div>
+            )}
+
+            {/* Neon Setup Guide & 1-Click SQL Copy */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  Neon 3-Step Quick Setup
+                </span>
+                <button
+                  onClick={handleCopySql}
+                  className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-semibold transition"
+                >
+                  {isCopiedSql ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  <span>{isCopiedSql ? 'Copied SQL!' : 'Copy SQL Script'}</span>
+                </button>
+              </div>
+
+              <ol className="list-decimal list-inside text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
+                <li>
+                  Create a free project at{' '}
+                  <a
+                    href="https://neon.tech"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-500 underline inline-flex items-center"
+                  >
+                    neon.tech <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                  </a>
+                </li>
+                <li>Open the <strong>SQL Editor</strong> in Neon, paste the copied SQL script, and click <strong>Run</strong>.</li>
+                <li>In your <strong>Vercel Project Settings → Environment Variables</strong>, add:
+                  <div className="mt-1 font-mono text-[10px] bg-slate-200 dark:bg-slate-900 p-1.5 rounded-lg select-all">
+                    DATABASE_URL = postgres://user:pass@ep-xyz.neon.tech/neondb?sslmode=require
+                  </div>
+                </li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: CATEGORIES */}
         {activeTab === 'categories' && (
           <div className="space-y-4 pt-1">
-            {/* Add Category Form */}
             <form
               onSubmit={handleAddCategory}
               className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3"
@@ -556,7 +785,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </select>
               </div>
 
-              {/* Icon selector & Color selector */}
               <div className="flex items-center space-x-3">
                 <div className="flex-1">
                   <label className="block text-[10px] text-slate-400 mb-1">Pick Icon</label>
@@ -594,7 +822,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </form>
 
-            {/* Existing Categories List */}
             <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
               {categories.map((c) => (
                 <div
@@ -622,25 +849,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
 
-        {/* TAB 3: BACKUP & RESTORE */}
+        {/* TAB 4: BACKUP */}
         {activeTab === 'backup' && (
           <div className="space-y-5 pt-1">
-            {/* Export Section */}
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
               <div className="flex items-center space-x-2">
                 <Download className="w-4 h-4 text-emerald-500" />
                 <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                  Export Encrypted Backup
+                  Export Encrypted JSON Backup
                 </h4>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Download all your transactions, receipt photos, recurring bills, goals, and debts
-                into a single JSON file. Data is encrypted client-side using Web Crypto AES-GCM.
+                Download an offline backup file encrypted with Web Crypto AES-GCM.
               </p>
 
               <div>
                 <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                  Passphrase (Optional, recommended for secure backups)
+                  Passphrase (Optional)
                 </label>
                 <input
                   type="password"
@@ -662,7 +887,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
-            {/* Restore Section */}
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
               <div className="flex items-center space-x-2">
                 <Upload className="w-4 h-4 text-sky-500" />
@@ -670,10 +894,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   Restore / Import Data
                 </h4>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Import and merge data from a previously exported TrackWise backup file.
-              </p>
-
               <input
                 type="file"
                 ref={fileInputRef}

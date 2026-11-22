@@ -2,7 +2,15 @@
  * Web Crypto API for 100% offline security:
  * - Salting and SHA-256 password & PIN hashing
  * - PBKDF2 + AES-GCM 256-bit encryption for export backups
+ * - Unique distributed sync ID generation
  */
+
+export function generateSyncId(prefix = 'item'): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
 
 export function generateSalt(): string {
   const array = new Uint8Array(16);

@@ -1,7 +1,20 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Lock, Sun, Moon, Bell, Plus, ShieldCheck } from 'lucide-react';
+import { useSync } from '../../context/SyncContext';
+import {
+  Lock,
+  Sun,
+  Moon,
+  Bell,
+  Plus,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  Database,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
 
 interface HeaderProps {
   onOpenQuickAdd: () => void;
@@ -18,26 +31,61 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { user, quickLock } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { syncStatus, lastSyncedAt, triggerSync } = useSync();
 
   return (
     <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 px-4 lg:px-8 py-3 transition-colors">
       <div className="flex items-center justify-between">
-        {/* Left Side Info */}
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800/80">
-              <ShieldCheck className="w-3 h-3 mr-1 text-emerald-500" />
-              100% Offline
-            </span>
-            <span className="hidden sm:inline-block text-xs text-slate-500 dark:text-slate-400">
-              Currency: <span className="font-semibold text-slate-800 dark:text-slate-200">{user?.currency || '₹'}</span>
-            </span>
-          </div>
+        {/* Left Side: Neon Sync Status & Currency Indicator */}
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          <button
+            onClick={() => triggerSync()}
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition cursor-pointer border shadow-xs"
+            title={
+              syncStatus === 'synced'
+                ? `Neon Cloud Synced at ${lastSyncedAt || 'recently'}. Click to sync now.`
+                : syncStatus === 'syncing'
+                ? 'Syncing with Neon Serverless Postgres...'
+                : syncStatus === 'offline'
+                ? 'Offline. Changes saved locally in Dexie.'
+                : 'Click to retry Neon sync.'
+            }
+          >
+            {syncStatus === 'synced' && (
+              <span className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <Database className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Neon Synced</span>
+              </span>
+            )}
+            {syncStatus === 'syncing' && (
+              <span className="flex items-center space-x-1 text-sky-600 dark:text-sky-400">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Syncing...</span>
+              </span>
+            )}
+            {syncStatus === 'offline' && (
+              <span className="flex items-center space-x-1 text-slate-500 dark:text-slate-400">
+                <CloudOff className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Offline (Saved)</span>
+              </span>
+            )}
+            {(syncStatus === 'error' || syncStatus === 'idle') && (
+              <span className="flex items-center space-x-1 text-slate-600 dark:text-slate-400">
+                <Database className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{syncStatus === 'error' ? 'Sync Check' : 'Neon Ready'}</span>
+              </span>
+            )}
+          </button>
+
+          <span className="hidden sm:inline-block text-xs text-slate-500 dark:text-slate-400">
+            Currency: <span className="font-semibold text-slate-800 dark:text-slate-200">{user?.currency || '₹'}</span>
+          </span>
         </div>
 
         {/* Right Action Icons */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          {/* Quick Add Button (Desktop only, mobile has FAB) */}
+          {/* Quick Add Button */}
           <button
             onClick={onOpenQuickAdd}
             className="hidden sm:inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-slate-950 text-xs font-semibold shadow-sm transition"

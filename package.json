@@ -12,6 +12,8 @@
     "android:sync": "echo 'Run npx cap sync android after installing @capacitor/cli'"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.1",
+    "@supabase/supabase-js": "^2.119.2",
     "dexie": "^4.0.11",
     "dexie-react-hooks": "^1.1.7",
     "jspdf": "^2.5.2",

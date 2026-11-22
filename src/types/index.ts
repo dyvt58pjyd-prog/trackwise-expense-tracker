@@ -15,6 +15,7 @@ export interface User {
 
 export interface Category {
   id?: number;
+  syncId?: string;
   userId: number;
   name: string;
   type: 'expense' | 'income';
@@ -25,6 +26,7 @@ export interface Category {
 
 export interface Transaction {
   id?: number;
+  syncId?: string;
   userId: number;
   amount: number;
   type: 'expense' | 'income';
@@ -38,6 +40,7 @@ export interface Transaction {
 
 export interface Bill {
   id?: number;
+  syncId?: string;
   userId: number;
   title: string;
   amount: number;
@@ -50,6 +53,7 @@ export interface Bill {
 
 export interface Goal {
   id?: number;
+  syncId?: string;
   userId: number;
   title: string;
   targetAmount: number;
@@ -60,6 +64,7 @@ export interface Goal {
 
 export interface Debt {
   id?: number;
+  syncId?: string;
   userId: number;
   personName: string;
   amount: number;

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { User, Category, Transaction, Bill, Goal, Debt } from '../types';
+import { generateSyncId } from '../utils/crypto';
 
 export class TrackWiseDatabase extends Dexie {
   users!: Table<User, number>;
@@ -18,6 +19,14 @@ export class TrackWiseDatabase extends Dexie {
       bills: '++id, userId, title, amount, dueDay, categoryId, paymentMode, lastPaidMonth, autoRemind',
       goals: '++id, userId, title, targetAmount, currentAmount, targetDate, color',
       debts: '++id, userId, personName, amount, type, date, dueDate, status, note',
+    });
+
+    this.version(2).stores({
+      categories: '++id, userId, syncId, name, type, icon, color, budgetLimit',
+      transactions: '++id, userId, syncId, amount, type, paymentMode, categoryId, date, note, receiptBlob, createdAt',
+      bills: '++id, userId, syncId, title, amount, dueDay, categoryId, paymentMode, lastPaidMonth, autoRemind',
+      goals: '++id, userId, syncId, title, targetAmount, currentAmount, targetDate, color',
+      debts: '++id, userId, syncId, personName, amount, type, date, dueDate, status, note',
     });
   }
 }
@@ -43,6 +52,7 @@ export async function seedDefaultCategories(userId: number): Promise<void> {
   if (count === 0) {
     const categoriesToInsert = DEFAULT_CATEGORIES.map((cat) => ({
       ...cat,
+      syncId: generateSyncId('cat'),
       userId,
     }));
     await db.categories.bulkAdd(categoriesToInsert as Category[]);
