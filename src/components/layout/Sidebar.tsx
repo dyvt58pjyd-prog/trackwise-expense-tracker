@@ -122,6 +122,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Lock className="w-4 h-4" />
           </button>
         </div>
+        <div className="mt-2 text-center">
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium tracking-wide">
+            Credits: Made by <span className="text-emerald-500 font-semibold">Anurag Bawaskar</span>
+          </p>
+        </div>
       </div>
     </aside>
   );

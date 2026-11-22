@@ -938,6 +938,12 @@ CREATE INDEX IF NOT EXISTS idx_debts_user ON debts (username, updated_at);`;
             </div>
           </div>
         )}
+        {/* Settings Footer Attribution */}
+        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+          <p className="text-[11px] text-slate-400 font-medium">
+            TrackWise • Credits: Made by <span className="text-emerald-500 font-semibold">Anurag Bawaskar</span>
+          </p>
+        </div>
       </div>
     </Modal>
   );

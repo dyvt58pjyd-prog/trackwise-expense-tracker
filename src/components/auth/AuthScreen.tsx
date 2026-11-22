@@ -355,10 +355,15 @@ export const AuthScreen: React.FC = () => {
           </form>
         )}
 
-        {/* Security Trust Badge */}
-        <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-center space-x-1.5 text-[11px] text-slate-400">
-          <Shield className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Web Crypto SHA-256 Salted • Zero Cloud Transmission</span>
+        {/* Security Trust Badge & Creator Credit */}
+        <div className="mt-6 pt-4 border-t border-slate-800/80 flex flex-col items-center justify-center space-y-1 text-center">
+          <div className="flex items-center space-x-1.5 text-[11px] text-slate-400">
+            <Shield className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Web Crypto SHA-256 Salted • Zero Cloud Transmission</span>
+          </div>
+          <p className="text-[10px] text-slate-500 pt-0.5">
+            Credits: Made by <span className="text-emerald-400 font-medium">Anurag Bawaskar</span>
+          </p>
         </div>
       </div>
     </div>

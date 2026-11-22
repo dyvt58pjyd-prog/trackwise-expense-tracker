@@ -1,4 +1,6 @@
-# 💰 TrackWise: Offline-First Daily Expense, Bill & Personal Finance Tracker (with Neon Cloud Sync)
+# 💰 TrackWise: Offline-First Daily Expense, Bill & Personal Finance Tracker
+
+> **Credits: Made by Anurag Bawaskar**
 
 A production-ready, **100% offline-first** Daily Expense, Bill & Personal Finance Tracker built with **React 18+, Vite, TypeScript, and Tailwind CSS**. Designed to run seamlessly as an installable **PWA (Web, Android, macOS, Windows)**, deployable with zero configuration to **Vercel via GitHub**, and integrated with **Neon Serverless PostgreSQL** for automatic two-way synchronization between Web and Android!
 
@@ -113,6 +115,11 @@ git push -u origin main
 2. Select your repository.
 3. In **Environment Variables**, add `DATABASE_URL` with your Neon connection string.
 4. Click **Deploy**.
+
+---
+
+## 👤 Author & Credits
+**Credits: Made by Anurag Bawaskar**
 
 ---
 
