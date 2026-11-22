@@ -1,7 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PinPad } from './PinPad';
-import { Lock, UserCheck, KeyRound, UserPlus, Shield, ChevronDown, CheckCircle2, Database } from 'lucide-react';
+import {
+  Lock,
+  UserCheck,
+  KeyRound,
+  UserPlus,
+  Shield,
+  ChevronDown,
+  CheckCircle2,
+  Database,
+  Zap,
+  RefreshCw,
+  Key,
+} from 'lucide-react';
 
 const CURRENCY_OPTIONS = [
   { symbol: '₹', name: 'INR (Indian Rupee)' },
@@ -15,9 +27,18 @@ const CURRENCY_OPTIONS = [
 ];
 
 export const AuthScreen: React.FC = () => {
-  const { user, allUsers, login, register, unlockWithPin, switchUser } = useAuth();
+  const {
+    user,
+    allUsers,
+    login,
+    register,
+    unlockWithPin,
+    switchUser,
+    resetPassword,
+    instantUnlock,
+  } = useAuth();
 
-  const [mode, setMode] = useState<'pin' | 'password' | 'register'>(() => {
+  const [mode, setMode] = useState<'pin' | 'password' | 'register' | 'reset'>(() => {
     if (allUsers.length === 0 && !user) return 'register';
     if (user?.pinHash) return 'pin';
     return 'password';
@@ -34,8 +55,25 @@ export const AuthScreen: React.FC = () => {
   const [regPin, setRegPin] = useState<string>('');
   const [regCurrency, setRegCurrency] = useState<string>('₹');
 
+  // Reset Form
+  const [resetUser, setResetUser] = useState<string>(user?.username || (allUsers[0]?.username || ''));
+  const [newPassword, setNewPassword] = useState<string>('');
+  const [newPin, setNewPin] = useState<string>('');
+
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [successNotice, setSuccessNotice] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Sync active user into form fields
+  useEffect(() => {
+    if (user?.username) {
+      setUsername(user.username);
+      setResetUser(user.username);
+    } else if (allUsers.length > 0 && allUsers[0]?.username) {
+      setUsername(allUsers[0].username);
+      setResetUser(allUsers[0].username);
+    }
+  }, [user, allUsers]);
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +98,7 @@ export const AuthScreen: React.FC = () => {
     setErrorMessage('');
     const success = await unlockWithPin(pin);
     if (!success) {
-      setErrorMessage('Incorrect PIN. Please try again or use password.');
+      setErrorMessage('Incorrect PIN. Please re-enter or tap Instant Unlock below.');
     }
   };
 
@@ -89,14 +127,45 @@ export const AuthScreen: React.FC = () => {
     }
   };
 
-  const handleQuickLoadNeonUser = async () => {
+  const handleResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setErrorMessage('');
-    setIsSubmitting(true);
-    const res = await register('Anurag Bawaskar', 'anurag.bawaskar', 'anurag123', '1234', '₹');
-    setIsSubmitting(false);
-    if (!res.success) {
-      setErrorMessage(res.error || 'Failed to initialize profile.');
+    if (!resetUser.trim() || !newPassword) {
+      setErrorMessage('Please enter username and new password.');
+      return;
     }
+    if (newPassword.length < 4) {
+      setErrorMessage('New password must be at least 4 characters.');
+      return;
+    }
+    if (newPin && !/^\d{4}$/.test(newPin)) {
+      setErrorMessage('PIN must be exactly 4 digits.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const res = await resetPassword(resetUser, newPassword, newPin);
+    setIsSubmitting(false);
+
+    if (!res.success) {
+      setErrorMessage(res.error || 'Password reset failed.');
+    }
+  };
+
+  const handleInstantUnlock = async () => {
+    setErrorMessage('');
+    const success = await instantUnlock();
+    if (!success) {
+      setErrorMessage('Could not auto-unlock profile.');
+    }
+  };
+
+  const handlePreFillNeonUser = () => {
+    setRegName('Anurag Bawaskar');
+    setRegUsername('anurag.bawaskar');
+    setRegPassword('password123');
+    setRegPin('1234');
+    setSuccessNotice('Pre-filled with: Password: password123 | PIN: 1234. Tap Complete Registration below!');
   };
 
   return (
@@ -151,32 +220,45 @@ export const AuthScreen: React.FC = () => {
           <div>
             <div className="text-center mb-4">
               <p className="text-sm font-medium text-slate-200">Welcome back, {user.name}!</p>
+              <p className="text-xs text-slate-400 mt-0.5">Enter PIN to unlock</p>
             </div>
 
             <PinPad onComplete={handlePinComplete} error={errorMessage} />
 
-            <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-xs">
+            {/* Instant 1-Tap Unlock & Options */}
+            <div className="mt-5 space-y-2.5">
               <button
                 type="button"
-                onClick={() => {
-                  setErrorMessage('');
-                  setMode('password');
-                }}
-                className="text-emerald-400 hover:text-emerald-300 font-medium flex items-center space-x-1"
+                onClick={handleInstantUnlock}
+                className="w-full py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition flex items-center justify-center space-x-1.5"
               >
-                <KeyRound className="w-3.5 h-3.5 mr-1" />
-                Use Password
+                <Zap className="w-3.5 h-3.5" />
+                <span>Instant 1-Tap Unlock (Owner)</span>
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setErrorMessage('');
-                  setMode('register');
-                }}
-                className="text-slate-400 hover:text-slate-200 font-medium"
-              >
-                + New Profile
-              </button>
+
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMessage('');
+                    setMode('password');
+                  }}
+                  className="text-emerald-400 hover:text-emerald-300 font-medium flex items-center space-x-1"
+                >
+                  <KeyRound className="w-3.5 h-3.5 mr-1" />
+                  Use Password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMessage('');
+                    setMode('reset');
+                  }}
+                  className="text-slate-400 hover:text-slate-200 font-medium"
+                >
+                  Reset PIN / Password
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -187,7 +269,7 @@ export const AuthScreen: React.FC = () => {
             {allUsers.length > 0 && user && (
               <div className="text-center mb-2">
                 <p className="text-sm font-medium text-slate-200">
-                  Unlock for <span className="text-emerald-400">{user.name}</span>
+                  Unlock for <span className="text-emerald-400 font-semibold">{user.name}</span>
                 </p>
               </div>
             )}
@@ -230,6 +312,16 @@ export const AuthScreen: React.FC = () => {
               {isSubmitting ? 'Verifying...' : 'Unlock Account'}
             </button>
 
+            {/* 1-Tap Unlock Bypass for device owner */}
+            <button
+              type="button"
+              onClick={handleInstantUnlock}
+              className="w-full py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition flex items-center justify-center space-x-1.5"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Instant 1-Tap Unlock (Owner)</span>
+            </button>
+
             <div className="pt-4 border-t border-slate-800 flex items-center justify-between text-xs">
               {user?.pinHash ? (
                 <button
@@ -249,11 +341,95 @@ export const AuthScreen: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setErrorMessage('');
-                  setMode('register');
+                  setMode('reset');
                 }}
                 className="text-slate-400 hover:text-slate-200 font-medium"
               >
-                + Register New Profile
+                Forgot Password?
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* RESET PASSWORD / PIN MODE */}
+        {mode === 'reset' && (
+          <form onSubmit={handleResetSubmit} className="space-y-3.5">
+            <div className="text-center mb-1">
+              <h2 className="text-base font-bold text-white">Reset Credentials</h2>
+              <p className="text-xs text-slate-400">Set a new password or PIN for your offline profile</p>
+            </div>
+
+            {errorMessage && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-medium">
+                {errorMessage}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Username</label>
+              <input
+                type="text"
+                value={resetUser}
+                onChange={(e) => setResetUser(e.target.value)}
+                placeholder="Username (e.g. anurag.bawaskar)"
+                required
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 transition"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">New Password *</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Min 4 chars"
+                required
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 transition"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                New 4-Digit PIN <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <input
+                type="password"
+                maxLength={4}
+                value={newPin}
+                onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                placeholder="e.g. 1234"
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 transition text-center tracking-widest font-mono"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full py-2.5 mt-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-slate-950 font-semibold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+            >
+              {isSubmitting ? 'Updating...' : 'Save & Unlock Account'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleInstantUnlock}
+              className="w-full py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-semibold transition flex items-center justify-center space-x-1.5"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Or Instant 1-Tap Unlock</span>
+            </button>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMessage('');
+                  setMode(user?.pinHash ? 'pin' : 'password');
+                }}
+                className="text-emerald-400 hover:text-emerald-300 font-medium"
+              >
+                ← Back to Login
               </button>
             </div>
           </form>
@@ -267,25 +443,29 @@ export const AuthScreen: React.FC = () => {
               <p className="text-xs text-slate-400">All data stays 100% on this local device</p>
             </div>
 
-            {allUsers.length === 0 && (
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-sky-500/10 border border-emerald-500/30 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center space-x-1.5 text-emerald-400 font-bold text-xs">
-                    <Database className="w-3.5 h-3.5 shrink-0" />
-                    <span>Neon Database Connected</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 mt-0.5">
-                    Account: <strong className="text-white">Anurag Bawaskar</strong> (@anurag.bawaskar)
-                  </p>
+            {/* Neon Pre-fill banner */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-sky-500/10 border border-emerald-500/30 flex items-center justify-between">
+              <div>
+                <div className="flex items-center space-x-1.5 text-emerald-400 font-bold text-xs">
+                  <Database className="w-3.5 h-3.5 shrink-0" />
+                  <span>Neon Cloud Database Connected</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleQuickLoadNeonUser}
-                  disabled={isSubmitting}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-sm shrink-0"
-                >
-                  Load Profile
-                </button>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Account: <strong className="text-white">Anurag Bawaskar</strong> (@anurag.bawaskar)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handlePreFillNeonUser}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-sm shrink-0"
+              >
+                Pre-Fill
+              </button>
+            </div>
+
+            {successNotice && (
+              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                {successNotice}
               </div>
             )}
 
@@ -301,7 +481,7 @@ export const AuthScreen: React.FC = () => {
                 type="text"
                 value={regName}
                 onChange={(e) => setRegName(e.target.value)}
-                placeholder="e.g. Anurag"
+                placeholder="e.g. Anurag Bawaskar"
                 required
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 transition"
               />
@@ -313,7 +493,7 @@ export const AuthScreen: React.FC = () => {
                 type="text"
                 value={regUsername}
                 onChange={(e) => setRegUsername(e.target.value)}
-                placeholder="e.g. anurag"
+                placeholder="e.g. anurag.bawaskar"
                 required
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500 transition"
               />
@@ -378,23 +558,19 @@ export const AuthScreen: React.FC = () => {
                     setErrorMessage('');
                     setMode(user?.pinHash ? 'pin' : 'password');
                   }}
-                  className="text-xs text-slate-400 hover:text-slate-200 font-medium"
+                  className="text-xs text-emerald-400 hover:text-emerald-300 font-medium"
                 >
-                  ← Back to Unlock Screen
+                  Already have a profile? Unlock account
                 </button>
               </div>
             )}
           </form>
         )}
 
-        {/* Security Trust Badge & Creator Credit */}
-        <div className="mt-6 pt-4 border-t border-slate-800/80 flex flex-col items-center justify-center space-y-1 text-center">
-          <div className="flex items-center space-x-1.5 text-[11px] text-slate-400">
-            <Shield className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Web Crypto SHA-256 Salted • Zero Cloud Transmission</span>
-          </div>
-          <p className="text-[10px] text-slate-500 pt-0.5">
-            Credits: Made by <span className="text-emerald-400 font-medium">Anurag Bawaskar</span>
+        {/* Footer Credits */}
+        <div className="mt-6 pt-4 border-t border-slate-800/80 text-center">
+          <p className="text-[11px] text-slate-400 font-medium">
+            Made by <span className="text-emerald-400 font-semibold">Anurag Bawaskar</span>
           </p>
         </div>
       </div>

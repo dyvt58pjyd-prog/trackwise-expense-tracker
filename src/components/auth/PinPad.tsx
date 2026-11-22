@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Delete, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Delete } from 'lucide-react';
 
 interface PinPadProps {
   onComplete: (pin: string) => void;
@@ -14,12 +14,23 @@ export const PinPad: React.FC<PinPadProps> = ({
 }) => {
   const [pin, setPin] = useState<string>('');
 
+  // Automatically clear PIN dots when an error occurs so the keypad is immediately ready
+  useEffect(() => {
+    if (error) {
+      setPin('');
+    }
+  }, [error]);
+
   const handleDigit = (digit: string) => {
     if (pin.length < 4) {
       const nextPin = pin + digit;
       setPin(nextPin);
       if (nextPin.length === 4) {
         onComplete(nextPin);
+        // Clear after 600ms so user can immediately retry if incorrect
+        setTimeout(() => {
+          setPin('');
+        }, 600);
       }
     }
   };

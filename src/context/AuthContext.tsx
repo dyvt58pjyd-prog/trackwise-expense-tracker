@@ -16,6 +16,9 @@ interface AuthContextType {
   updateUserSettings: (updates: Partial<User>) => Promise<void>;
   switchUser: (userId: number) => Promise<void>;
   refreshUsers: () => Promise<void>;
+  resetPassword: (username: string, newPassword: string, newPin?: string) => Promise<{ success: boolean; error?: string }>;
+  instantUnlock: (userId?: number) => Promise<boolean>;
+  deleteUser: (userId: number) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -224,6 +227,88 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAllUsers((prev) => prev.map((u) => (u.id === user.id ? updated : u)));
   };
 
+  const resetPassword = async (
+    username: string,
+    newPassword: string,
+    newPin?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const cleanUsername = username.trim().toLowerCase();
+      const matched = await db.users.where('username').equalsIgnoreCase(cleanUsername).first();
+      if (!matched) {
+        return { success: false, error: 'User profile not found. Check username.' };
+      }
+
+      const salt = generateSalt();
+      const passwordHash = await hashWithSalt(newPassword, salt);
+      let pinHash: string | undefined = undefined;
+      if (newPin && newPin.length === 4) {
+        pinHash = await hashWithSalt(newPin, salt);
+      }
+
+      await db.users.update(matched.id!, {
+        salt,
+        passwordHash,
+        pinHash: newPin ? pinHash : matched.pinHash,
+      });
+
+      const updated = {
+        ...matched,
+        salt,
+        passwordHash,
+        pinHash: newPin ? pinHash : matched.pinHash,
+      };
+      setUser(updated);
+      setIsLocked(false);
+      localStorage.setItem(ACTIVE_USER_ID_KEY, String(matched.id));
+      sessionStorage.setItem(SESSION_UNLOCKED_KEY, 'true');
+      lastActivityRef.current = Date.now();
+      await refreshUsers();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to reset credentials.' };
+    }
+  };
+
+  const instantUnlock = async (userId?: number): Promise<boolean> => {
+    try {
+      let target = user;
+      if (userId) {
+        target = allUsers.find((u) => u.id === userId) || null;
+      } else if (!target && allUsers.length > 0) {
+        target = allUsers[0];
+      }
+
+      if (!target || !target.id) return false;
+
+      setUser(target);
+      setIsLocked(false);
+      localStorage.setItem(ACTIVE_USER_ID_KEY, String(target.id));
+      sessionStorage.setItem(SESSION_UNLOCKED_KEY, 'true');
+      lastActivityRef.current = Date.now();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const deleteUser = async (userId: number): Promise<boolean> => {
+    try {
+      await db.users.delete(userId);
+      await refreshUsers();
+      const remaining = allUsers.filter((u) => u.id !== userId);
+      if (remaining.length > 0) {
+        setUser(remaining[0]);
+      } else {
+        setUser(null);
+      }
+      setIsLocked(true);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -239,6 +324,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateUserSettings,
         switchUser,
         refreshUsers,
+        resetPassword,
+        instantUnlock,
+        deleteUser,
       }}
     >
       {children}
