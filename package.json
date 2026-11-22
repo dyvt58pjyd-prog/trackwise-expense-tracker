@@ -10,9 +10,17 @@
     "preview": "vite preview",
     "electron:dev": "vite build && electron electron/main.js",
     "electron:build": "vite build",
-    "android:sync": "echo 'Run npx cap sync android after installing @capacitor/cli'"
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:build": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/camera": "^8.2.6",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4",
     "@neondatabase/serverless": "^1.2.1",
     "@supabase/supabase-js": "^2.119.2",
     "dexie": "^4.0.11",
