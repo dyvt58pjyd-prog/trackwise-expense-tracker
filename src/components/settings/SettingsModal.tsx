@@ -7,7 +7,7 @@ import { Category, BackupData } from '../../types';
 import { CategoryIcon, AVAILABLE_ICONS } from '../../utils/categoryIcons';
 import { blobToBase64, base64ToBlob } from '../../utils/imageCompression';
 import { encryptBackup, decryptBackup, hashWithSalt } from '../../utils/crypto';
-import { downloadFile, isCapacitor } from '../../utils/platform';
+import { downloadFile, isCapacitor, isElectron } from '../../utils/platform';
 import { getCurrentDateStr } from '../../utils/formatters';
 import {
   User,
@@ -664,18 +664,18 @@ CREATE INDEX IF NOT EXISTS idx_debts_user ON debts (username, updated_at);`;
               </button>
             </div>
 
-            {/* Server Endpoint URL (Needed for Android APK to connect to Vercel) */}
+            {/* Server Endpoint URL / Neon Connection String */}
             <form onSubmit={handleSaveNeonUrl} className="space-y-2">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Sync Server URL (Vercel Deployment)
+                Neon Database Connection / Sync Server URL
               </label>
               <div className="flex items-center space-x-2">
                 <input
-                  type="url"
+                  type="text"
                   value={customServerUrl}
                   onChange={(e) => setCustomServerUrl(e.target.value)}
-                  placeholder="https://your-expense-tracker.vercel.app"
-                  className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs focus:outline-none focus:border-emerald-500"
+                  placeholder="postgresql://... or https://your-expense-tracker.vercel.app"
+                  className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs focus:outline-none focus:border-emerald-500 font-mono"
                 />
                 <button
                   type="button"
@@ -693,9 +693,11 @@ CREATE INDEX IF NOT EXISTS idx_debts_user ON debts (username, updated_at);`;
                 </button>
               </div>
               <p className="text-[10px] text-slate-400">
-                {isCapacitor()
-                  ? 'On Android, set this to your deployed Vercel domain (e.g. https://my-app.vercel.app).'
-                  : 'On Web, leaving this blank automatically uses your current domain.'}
+                {isElectron()
+                  ? 'macOS App uses native direct Neon driver. Default configured connection is automatically active.'
+                  : isCapacitor()
+                  ? 'On Android, set this to your deployed Vercel domain or direct Neon endpoint.'
+                  : 'On Web, leaving this blank automatically connects using the configured Neon instance.'}
               </p>
             </form>
 

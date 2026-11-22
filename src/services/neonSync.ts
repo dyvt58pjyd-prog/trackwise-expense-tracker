@@ -3,6 +3,11 @@ import { User, Category, Transaction, Bill, Goal, Debt } from '../types';
 import { generateSyncId } from '../utils/crypto';
 import { blobToBase64, base64ToBlob } from '../utils/imageCompression';
 import { isCapacitor, isElectron } from '../utils/platform';
+import { neon } from '@neondatabase/serverless';
+
+export const DEFAULT_NEON_DATABASE_URL =
+  import.meta.env.VITE_DATABASE_URL ||
+  'postgresql://neondb_owner:npg_9mo7esCPuTLg@ep-aged-field-befka0w6-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require';
 
 const STORAGE_SERVER_URL_KEY = 'trackwise_sync_server_url';
 
@@ -12,22 +17,60 @@ export function getSyncServerUrl(): string {
     return customUrl.trim().replace(/\/+$/, '');
   }
 
-  // If in Capacitor Android or Electron, a full URL is needed if not hosted on localhost
-  if (typeof window !== 'undefined' && window.location.origin && !isCapacitor()) {
+  // If in Electron, we connect directly via native bridge or direct Neon driver
+  if (isElectron()) {
+    return DEFAULT_NEON_DATABASE_URL;
+  }
+
+  // If in standard web browser
+  if (typeof window !== 'undefined' && window.location.origin && !isCapacitor() && !window.location.protocol.startsWith('file')) {
     return window.location.origin;
   }
 
-  return '';
+  return DEFAULT_NEON_DATABASE_URL;
 }
 
 export function saveSyncServerUrl(url: string): void {
   localStorage.setItem(STORAGE_SERVER_URL_KEY, url.trim().replace(/\/+$/, ''));
 }
 
-export async function testNeonServerConnection(targetUrl?: string): Promise<{ success: boolean; connected?: boolean; engine?: string; error?: string }> {
-  const baseUrl = targetUrl !== undefined ? targetUrl.trim().replace(/\/+$/, '') : getSyncServerUrl();
-  const endpoint = `${baseUrl}/api/sync`;
+/**
+ * Tests connection to Neon Serverless Postgres
+ */
+export async function testNeonServerConnection(targetUrl?: string): Promise<{
+  success: boolean;
+  connected?: boolean;
+  engine?: string;
+  error?: string;
+}> {
+  // 1. Electron Native Desktop IPC
+  if (typeof window !== 'undefined' && window.electronAPI?.neonTest) {
+    try {
+      return await window.electronAPI.neonTest(targetUrl);
+    } catch (err: any) {
+      return { success: false, connected: false, error: err.message };
+    }
+  }
 
+  const effectiveUrl = targetUrl !== undefined && targetUrl.trim() ? targetUrl.trim() : getSyncServerUrl();
+
+  // 2. Direct Neon Postgres connection (via SQL HTTP API)
+  if (effectiveUrl.startsWith('postgres://') || effectiveUrl.startsWith('postgresql://')) {
+    try {
+      const sql = neon(effectiveUrl);
+      const res = await sql`SELECT 1 as connected, current_database() as db`;
+      return {
+        success: true,
+        connected: Boolean(res?.[0]?.connected),
+        engine: 'Neon Serverless PostgreSQL (Direct Driver)',
+      };
+    } catch (err: any) {
+      return { success: false, connected: false, error: err.message };
+    }
+  }
+
+  // 3. Fallback to /api/sync endpoint (e.g. Vercel deployment)
+  const endpoint = `${effectiveUrl.replace(/\/+$/, '')}/api/sync`;
   try {
     const res = await fetch(endpoint, {
       method: 'GET',
@@ -51,15 +94,15 @@ export async function testNeonServerConnection(targetUrl?: string): Promise<{ su
 }
 
 /**
- * Full 2-way sync with Neon Serverless Postgres via /api/sync
+ * Full 2-way sync with Neon Serverless Postgres
  */
-export async function syncWithNeonServer(user: User, targetUrl?: string): Promise<{ success: boolean; timestamp: string }> {
+export async function syncWithNeonServer(
+  user: User,
+  targetUrl?: string
+): Promise<{ success: boolean; timestamp: string }> {
   if (!user || !user.id || !user.username) {
     throw new Error('User not logged in for sync.');
   }
-
-  const baseUrl = targetUrl !== undefined ? targetUrl.trim().replace(/\/+$/, '') : getSyncServerUrl();
-  const endpoint = `${baseUrl}/api/sync`;
 
   // 1. Prepare local push payload
   const localCats = await db.categories.where('userId').equals(user.id).toArray();
@@ -178,16 +221,26 @@ export async function syncWithNeonServer(user: User, targetUrl?: string): Promis
 
   const lastSyncedAt = localStorage.getItem('trackwise_last_synced_at');
 
-  // 2. Dispatch to /api/sync
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
+  let resData: {
+    success: boolean;
+    timestamp: string;
+    pull?: {
+      categories?: any[];
+      transactions?: any[];
+      bills?: any[];
+      goals?: any[];
+      debts?: any[];
+    };
+    error?: string;
+  };
+
+  // 2. Dispatch Sync
+  // Method A: Native Electron Bridge
+  if (typeof window !== 'undefined' && window.electronAPI?.neonSync) {
+    resData = await window.electronAPI.neonSync({
       username: user.username,
       lastSyncedAt,
+      connectionString: targetUrl || DEFAULT_NEON_DATABASE_URL,
       push: {
         categories: pushCategories,
         transactions: pushTransactions,
@@ -195,17 +248,158 @@ export async function syncWithNeonServer(user: User, targetUrl?: string): Promis
         goals: pushGoals,
         debts: pushDebts,
       },
-    }),
-  });
+    });
+  } else {
+    const effectiveUrl = targetUrl !== undefined && targetUrl.trim() ? targetUrl.trim() : getSyncServerUrl();
 
-  const resData = await response.json();
-  if (!response.ok || !resData.success) {
-    throw new Error(resData.error || `HTTP ${response.status}: Server sync failed.`);
+    // Method B: Direct Neon Driver (Web / PWA / Capacitor)
+    if (effectiveUrl.startsWith('postgres://') || effectiveUrl.startsWith('postgresql://')) {
+      const sql = neon(effectiveUrl);
+      const cleanUser = user.username.trim().toLowerCase();
+      const nowIso = new Date().toISOString();
+
+      // Push categories
+      for (const cat of pushCategories) {
+        if (!cat.syncId) continue;
+        await sql`
+          INSERT INTO categories (sync_id, username, name, type, icon, color, budget_limit, updated_at)
+          VALUES (${cat.syncId}, ${cleanUser}, ${cat.name}, ${cat.type}, ${cat.icon}, ${cat.color}, ${cat.budgetLimit || null}, ${nowIso})
+          ON CONFLICT (sync_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            type = EXCLUDED.type,
+            icon = EXCLUDED.icon,
+            color = EXCLUDED.color,
+            budget_limit = EXCLUDED.budget_limit,
+            updated_at = ${nowIso};
+        `;
+      }
+
+      // Push transactions
+      for (const tx of pushTransactions) {
+        if (!tx.syncId) continue;
+        await sql`
+          INSERT INTO transactions (sync_id, username, amount, type, payment_mode, category_name, date, note, receipt_base64, created_at, updated_at)
+          VALUES (${tx.syncId}, ${cleanUser}, ${tx.amount}, ${tx.type}, ${tx.paymentMode}, ${tx.categoryName}, ${tx.date}, ${tx.note || null}, ${tx.receiptBase64 || null}, ${tx.createdAt || Date.now()}, ${nowIso})
+          ON CONFLICT (sync_id) DO UPDATE SET
+            amount = EXCLUDED.amount,
+            type = EXCLUDED.type,
+            payment_mode = EXCLUDED.payment_mode,
+            category_name = EXCLUDED.category_name,
+            date = EXCLUDED.date,
+            note = EXCLUDED.note,
+            receipt_base64 = COALESCE(EXCLUDED.receipt_base64, transactions.receipt_base64),
+            updated_at = ${nowIso};
+        `;
+      }
+
+      // Push bills
+      for (const bill of pushBills) {
+        if (!bill.syncId) continue;
+        await sql`
+          INSERT INTO bills (sync_id, username, title, amount, due_day, category_name, payment_mode, last_paid_month, auto_remind, updated_at)
+          VALUES (${bill.syncId}, ${cleanUser}, ${bill.title}, ${bill.amount}, ${bill.dueDay}, ${bill.categoryName}, ${bill.paymentMode}, ${bill.lastPaidMonth || null}, ${bill.autoRemind ?? true}, ${nowIso})
+          ON CONFLICT (sync_id) DO UPDATE SET
+            title = EXCLUDED.title,
+            amount = EXCLUDED.amount,
+            due_day = EXCLUDED.due_day,
+            category_name = EXCLUDED.category_name,
+            payment_mode = EXCLUDED.payment_mode,
+            last_paid_month = EXCLUDED.last_paid_month,
+            auto_remind = EXCLUDED.auto_remind,
+            updated_at = ${nowIso};
+        `;
+      }
+
+      // Push goals
+      for (const goal of pushGoals) {
+        if (!goal.syncId) continue;
+        await sql`
+          INSERT INTO goals (sync_id, username, title, target_amount, current_amount, target_date, color, updated_at)
+          VALUES (${goal.syncId}, ${cleanUser}, ${goal.title}, ${goal.targetAmount}, ${goal.currentAmount}, ${goal.targetDate}, ${goal.color}, ${nowIso})
+          ON CONFLICT (sync_id) DO UPDATE SET
+            title = EXCLUDED.title,
+            target_amount = EXCLUDED.target_amount,
+            current_amount = EXCLUDED.current_amount,
+            target_date = EXCLUDED.target_date,
+            color = EXCLUDED.color,
+            updated_at = ${nowIso};
+        `;
+      }
+
+      // Push debts
+      for (const debt of pushDebts) {
+        if (!debt.syncId) continue;
+        await sql`
+          INSERT INTO debts (sync_id, username, person_name, amount, type, date, due_date, status, note, updated_at)
+          VALUES (${debt.syncId}, ${cleanUser}, ${debt.personName}, ${debt.amount}, ${debt.type}, ${debt.date}, ${debt.dueDate || null}, ${debt.status}, ${debt.note || null}, ${nowIso})
+          ON CONFLICT (sync_id) DO UPDATE SET
+            person_name = EXCLUDED.person_name,
+            amount = EXCLUDED.amount,
+            type = EXCLUDED.type,
+            date = EXCLUDED.date,
+            due_date = EXCLUDED.due_date,
+            status = EXCLUDED.status,
+            note = EXCLUDED.note,
+            updated_at = ${nowIso};
+        `;
+      }
+
+      // PULL latest records from Neon
+      const [categories, transactions, bills, goals, debts] = await Promise.all([
+        sql`SELECT sync_id, name, type, icon, color, budget_limit, updated_at FROM categories WHERE username = ${cleanUser}`,
+        sql`SELECT sync_id, amount, type, payment_mode, category_name, date, note, receipt_base64, created_at, updated_at FROM transactions WHERE username = ${cleanUser} ORDER BY date DESC, created_at DESC`,
+        sql`SELECT sync_id, title, amount, due_day, category_name, payment_mode, last_paid_month, auto_remind, updated_at FROM bills WHERE username = ${cleanUser}`,
+        sql`SELECT sync_id, title, target_amount, current_amount, target_date, color, updated_at FROM goals WHERE username = ${cleanUser}`,
+        sql`SELECT sync_id, person_name, amount, type, date, due_date, status, note, updated_at FROM debts WHERE username = ${cleanUser}`,
+      ]);
+
+      resData = {
+        success: true,
+        timestamp: nowIso,
+        pull: {
+          categories,
+          transactions,
+          bills,
+          goals,
+          debts,
+        },
+      };
+    } else {
+      // Method C: External Vercel HTTP Endpoint
+      const endpoint = `${effectiveUrl.replace(/\/+$/, '')}/api/sync`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          username: user.username,
+          lastSyncedAt,
+          push: {
+            categories: pushCategories,
+            transactions: pushTransactions,
+            bills: pushBills,
+            goals: pushGoals,
+            debts: pushDebts,
+          },
+        }),
+      });
+
+      resData = await response.json();
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || `HTTP ${response.status}: Server sync failed.`);
+      }
+    }
+  }
+
+  if (!resData.success) {
+    throw new Error(resData.error || 'Neon sync failed.');
   }
 
   const { pull, timestamp } = resData;
 
-  // 3. Upsert PULL records into Dexie
+  // 3. Upsert PULL records into Dexie IndexedDB
   // A. Categories
   if (pull?.categories) {
     for (const rc of pull.categories) {

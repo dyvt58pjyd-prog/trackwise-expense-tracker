@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PinPad } from './PinPad';
-import { Lock, UserCheck, KeyRound, UserPlus, Shield, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { Lock, UserCheck, KeyRound, UserPlus, Shield, ChevronDown, CheckCircle2, Database } from 'lucide-react';
 
 const CURRENCY_OPTIONS = [
   { symbol: '₹', name: 'INR (Indian Rupee)' },
@@ -86,6 +86,16 @@ export const AuthScreen: React.FC = () => {
 
     if (!res.success) {
       setErrorMessage(res.error || 'Registration failed.');
+    }
+  };
+
+  const handleQuickLoadNeonUser = async () => {
+    setErrorMessage('');
+    setIsSubmitting(true);
+    const res = await register('Anurag Bawaskar', 'anurag.bawaskar', 'anurag123', '1234', '₹');
+    setIsSubmitting(false);
+    if (!res.success) {
+      setErrorMessage(res.error || 'Failed to initialize profile.');
     }
   };
 
@@ -256,6 +266,28 @@ export const AuthScreen: React.FC = () => {
               <h2 className="text-base font-bold text-white">Create Offline Account</h2>
               <p className="text-xs text-slate-400">All data stays 100% on this local device</p>
             </div>
+
+            {allUsers.length === 0 && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-sky-500/10 border border-emerald-500/30 flex items-center justify-between">
+                <div>
+                  <div className="flex items-center space-x-1.5 text-emerald-400 font-bold text-xs">
+                    <Database className="w-3.5 h-3.5 shrink-0" />
+                    <span>Neon Database Connected</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    Account: <strong className="text-white">Anurag Bawaskar</strong> (@anurag.bawaskar)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleQuickLoadNeonUser}
+                  disabled={isSubmitting}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-sm shrink-0"
+                >
+                  Load Profile
+                </button>
+              </div>
+            )}
 
             {errorMessage && (
               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-medium">

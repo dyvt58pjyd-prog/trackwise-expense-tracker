@@ -9,6 +9,8 @@ declare global {
     electronAPI?: {
       platform: string;
       showSaveDialog: (options: any) => Promise<any>;
+      neonTest?: (connStr?: string) => Promise<{ success: boolean; connected?: boolean; engine?: string; error?: string; database?: string }>;
+      neonSync?: (payload: any) => Promise<any>;
     };
     Capacitor?: any;
   }
