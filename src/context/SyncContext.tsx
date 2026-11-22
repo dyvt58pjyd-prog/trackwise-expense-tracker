@@ -38,11 +38,6 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    if (!navigator.onLine) {
-      setSyncStatus('offline');
-      return;
-    }
-
     if (isSyncingRef.current) return;
     isSyncingRef.current = true;
 
@@ -50,7 +45,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSyncStatus('syncing');
       setErrorMessage(null);
 
-      const res = await syncWithNeonServer(user);
+      await syncWithNeonServer(user);
 
       const displayTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       setLastSyncedAt(displayTime);
@@ -58,19 +53,21 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSyncStatus('synced');
     } catch (err: any) {
       console.warn('Neon sync issue:', err.message);
-      // If server is not yet deployed or database url not set, fail gracefully without disrupting offline experience
-      setSyncStatus('error');
+      const isNetError =
+        err.message?.includes('Failed to fetch') ||
+        err.message?.includes('NetworkError') ||
+        err.message?.includes('Cannot reach') ||
+        (typeof navigator !== 'undefined' && !navigator.onLine);
+      setSyncStatus(isNetError ? 'offline' : 'error');
       setErrorMessage(err.message || 'Sync failed.');
     } finally {
       isSyncingRef.current = false;
     }
   }, [user]);
 
-  // Initial sync & periodic background sync (every 60s when online)
+  // Initial sync & periodic background sync (every 60s)
   useEffect(() => {
-    if (!navigator.onLine) {
-      setSyncStatus('offline');
-    } else if (user) {
+    if (user) {
       triggerSync();
     }
 
@@ -87,7 +84,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Periodic sync
     const interval = setInterval(() => {
-      if (navigator.onLine && user && !isSyncingRef.current) {
+      if (user && !isSyncingRef.current) {
         triggerSync();
       }
     }, 60000);
